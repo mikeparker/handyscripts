@@ -1,6 +1,7 @@
 # This script moves 1 commit from your current branch to a new branch then switches back to your original branch
 # if you specify a 2nd argument you can specify a remote master branch different to origin/master
 # This is useful if you want a quick bug fix or fix an error message, but push it separately to your current work.
+# You can put this in your .bashrc file in a function e.g. movecommit() so you can do `$ movecommit newbranch` from the command line.
 
 NEW_BRANCH=$1
 MASTER_BRANCH=${2:-origin/master}
