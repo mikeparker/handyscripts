@@ -19,6 +19,8 @@ echo
 echo 3. Cherry picking a single commit..
 git cherry-pick $COMMIT_SHA || return "$?"
 
+NEW LINE HERE
+
 echo
 echo 4. Switching back to original branch: $ORIGINAL_BRANCH
 git checkout $ORIGINAL_BRANCH || return "$?"
