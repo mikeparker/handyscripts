@@ -29,7 +29,6 @@ echo 5. Rolling original branch back 1 commit..
 git reset --hard HEAD~1 || return "$?"
 
 if [ "$STASH_RESULT" != "No local changes to save" ]; then
-echo
-	6. echo Un-stashing..
+	echo 6. Un-stashing..
 	git stash pop || return "$?"
 fi
