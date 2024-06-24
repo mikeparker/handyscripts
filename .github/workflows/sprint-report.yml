@@ -1,0 +1,225 @@
+name: Slack Sprint Report
+
+on:
+  repository_dispatch:
+    types: [sprint_report]
+  workflow_dispatch:
+    inputs:
+      sprint_name:
+        description: 'Jira Sprint Name (e.g. Sprint 14)'
+        required: true
+      sprint_number:
+        description: 'Jira Sprint Number (e.g. 1234)'
+        required: true
+      jira_project:
+        description: 'Jira project ID (e.g. CPUB)'
+        required: true
+      slack_channel_id:
+        description: 'Slack channel id to send report to (e.g. C02QP4ZJ9KL)'
+        required: true
+jobs:
+  sprint-report:
+    runs-on: ubuntu-latest
+    steps:
+    - 
+      name: Consolidate inputs
+      id: set_vars
+      run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "::set-output name=sprint_name::${{ github.event.inputs.sprint_name }}"
+            echo "::set-output name=sprint_number::${{ github.event.inputs.sprint_number }}"
+            echo "::set-output name=jira_project::${{ github.event.inputs.jira_project }}"
+            echo "::set-output name=slack_channel_id::${{ github.event.inputs.slack_channel_id }}"
+          elif [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            echo "::set-output name=sprint_name::${{ github.event.client_payload.sprint_name }}"
+            echo "::set-output name=sprint_number::${{ github.event.client_payload.sprint_number }}"
+            echo "::set-output name=jira_project::${{ github.event.client_payload.jira_project }}"
+            echo "::set-output name=slack_channel_id::${{ github.event.client_payload.slack_channel_id }}"
+          fi
+    -      
+      name: Get completed issues
+      id: jql
+      uses: DanielHilton/jira-jql-search@v0.1.0
+      env:
+        JIRA_HOST: docker.atlassian.net
+        JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+        JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      with:
+        jql: 'status = Done AND sprint = ${{ steps.set_vars.outputs.sprint_number }} ORDER BY created DESC'
+    -
+      name: Parse json
+      id: json
+      run: |
+        # 1. write the issue data to a file to make jq usage easier
+        cat << EOF123 > /tmp/jql.json
+        ${{ steps.jql.outputs.issueData }}
+        EOF123
+
+        # 2. Flatten json format into a simple structure
+        all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
+
+        # 3. Group issues by type
+        grouped2=$(echo $all | jq 'group_by (.issuetype)[]')
+
+        # 4. Count issues of each type
+        NUM_STORY=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Story"))) | length')
+        NUM_BUG=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Bug"))) | length')
+        NUM_TASK=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Task"))) | length')
+        NUM_SUBTASK=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Sub-task"))) | length')
+
+        # Debugging
+        echo $grouped2
+        echo "--------"
+        
+        # 5. Build up OUTPUT variable for long slack thread response. Using base64 otherwise special character break processing.
+        for row in $(echo "${grouped2}" | jq -r '.[] | @base64'); do
+
+            # Helper function to decode base64 and run jq queries
+            _jq() {
+             echo ${row} | base64 --decode | jq -r ${1}
+            }
+            
+          # if new issue type print header
+          if [ "$issuetype" != "$(_jq '.issuetype')" ]; then
+            issuetype=$(_jq '.issuetype')
+            echo $issuetype
+            
+            if [ "$issuetype" == "Story" ]; then
+              NEXT_SUMMARY=":large_green_square: *Story:$NUM_STORY*"
+            elif [ "$issuetype" == "Task" ]; then
+              NEXT_SUMMARY=":large_blue_square: *Task:$NUM_TASK*"
+            elif [ "$issuetype" == "Sub-task" ]; then
+              NEXT_SUMMARY=":subtask-jira: *Sub-task:$NUM_SUBTASK*"
+            elif [ "$issuetype" == "Bug" ]; then
+              NEXT_SUMMARY=":large_red_square: *Bug:$NUM_BUG*"
+            else
+              NEXT_SUMMARY=":point_right: *$issuetype*"
+            fi
+            # check if OUTPUT is null
+            if [ -z "$OUTPUT" ]; then
+              OUTPUT="$NEXT_SUMMARY"
+            else
+              OUTPUT="$OUTPUT\n\n$NEXT_SUMMARY"
+            fi
+            
+          fi
+          NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq '.key')"|"$(_jq '.key') $(_jq '.summary')">" "~" $(_jq '.assignee') "("$(_jq '.status')")")
+          echo "$NEXT"
+          OUTPUT="$OUTPUT\n$NEXT"
+        done
+        echo "----------"
+        echo $OUTPUT
+        echo ::set-output name=OUTPUT::$OUTPUT
+        
+        NUMBER_OF_ISSUES=$(cat /tmp/jql.json | jq '.issues | length')
+        echo $NUMBER_OF_ISSUES
+        echo ::set-output name=NUMBER_OF_ISSUES::$NUMBER_OF_ISSUES
+        
+        # Make data for google sheet
+        # [[ "<date range>", "Story",	"Bug", "Task", "Sub-task", "Total" ]]
+        DATE=$(date '+%Y-%m-%d')
+        echo "NUM_STORY=$NUM_STORY" >> $GITHUB_OUTPUT
+        echo "NUM_BUG=$NUM_BUG" >> $GITHUB_OUTPUT
+        echo "NUM_TASK=$NUM_TASK" >> $GITHUB_OUTPUT
+        echo "NUM_SUBTASK=$NUM_SUBTASK" >> $GITHUB_OUTPUT
+        echo ::set-output name=DATA::[[ '"'${{ steps.set_vars.outputs.sprint_name }}'"', '"'$NUM_STORY'"', '"'$NUM_BUG'"', '"'$NUM_TASK'"', '"'$NUM_SUBTASK'"', '"'$NUMBER_OF_ISSUES'"']]
+        
+        SUMMARY="*Sprint Completed ${{ steps.set_vars.outputs.sprint_name }}*: <https://docker.atlassian.net/jira/software/c/projects/${{ steps.set_vars.outputs.jira_project }}/issues/?jql=status%20%3D%20Done%20AND%20sprint%20%3D%20${{ steps.set_vars.outputs.sprint_number }}%20ORDER%20BY%20created%20DESC|$NUMBER_OF_ISSUES completed tickets>:"
+        if [ "$NUM_STORY" != "0" ]; then
+          SUMMARY="$SUMMARY  :large_green_square: $NUM_STORY Story"
+        fi
+        if [ "$NUM_BUG" != "0" ]; then
+          SUMMARY="$SUMMARY  :large_red_square: $NUM_BUG Bug"
+        fi
+        if [ "$NUM_TECHNICAL_DEBT" != "0" ]; then
+          SUMMARY="$SUMMARY  :large_blue_square: $NUM_TASK Task"
+        fi
+        if [ "$NUM_KLO" != "0" ]; then
+          SUMMARY="$SUMMARY  :subtask-jira: $NUM_SUBTASK Sub-task"
+        fi
+        echo "SUMMARY=$SUMMARY." >> $GITHUB_OUTPUT
+    -
+      name: Output to test slack (e.g. private DM)
+      run: |
+        curl -X POST -H 'Content-type: application/json' --data '{"text":":jira: ${{ steps.json.outputs.SUMMARY }}"}' ${{ secrets.SLACK_WEBHOOK_TEST }}
+    -
+      name: Send Channel Slack Message
+      uses: archive/github-actions-slack@master
+      id: send-message
+      with:
+        slack-function: send-message
+        slack-bot-user-oauth-access-token: ${{ secrets.SLACK_BOT_USER_OAUTH_ACCESS_TOKEN }}
+        slack-channel: ${{ steps.set_vars.outputs.slack_channel_id }}
+        slack-text: ":jira: ${{ steps.json.outputs.SUMMARY }}"
+
+    - name: Send Thread Message
+      uses: archive/github-actions-slack@master
+      with:
+        slack-function: send-message
+        slack-bot-user-oauth-access-token: ${{ secrets.SLACK_BOT_USER_OAUTH_ACCESS_TOKEN }}
+        slack-channel: ${{ fromJson(steps.send-message.outputs.slack-result).response.channel }}
+        slack-text:  ${{ steps.json.outputs.OUTPUT }}
+        slack-optional-thread_ts: ${{ fromJson(steps.send-message.outputs.slack-result).response.message.ts }}
+      
+    - 
+      name: Write data to google sheets
+      id: 'update_worksheet'
+      uses: jroehl/gsheet.action@v1.0.0
+      with:
+        spreadsheetId: 1d8At_TAN-7um6-1Bb77c8nf06yeATC-SYvzAhQ8EEjE # Note you need to create a tab in the spreadsheet first with your project ID (e.g. CPUB)
+        commands: | # list of commands, specified as a valid JSON string
+          [
+            { "command": "appendData", "args": { "minCol" : 1, "worksheetTitle" : "${{ steps.set_vars.outputs.jira_project }}", "valueInputOption" : "USER_ENTERED", "data": ${{ steps.json.outputs.DATA }} } },
+            { "command": "getData", "args": { "range": "'${{ steps.set_vars.outputs.jira_project }}'!A2:H999" } }
+          ]
+      env:
+        GSHEET_CLIENT_EMAIL: hub-service-account@positive-cacao-docker.iam.gserviceaccount.com
+        GSHEET_PRIVATE_KEY: ${{ secrets.GSHEET_PRIVATE_KEY }}
+    - 
+      name: Output sheets results for debug
+      id: sheets
+      env:
+        RESULTS: ${{ steps.update_worksheet.outputs.results }}
+      run: |
+        # Get all the results in a format we can use with imagecharts
+        # We have to transpose columns and rows
+        echo "$RESULTS" | jq -c '.results[1].result.rawData | .[]' > tmp.txt
+        while read row; do
+          _jq() {
+           echo ${row} | jq -r ${1}
+          }
+          echo Row is $row
+
+          # Concatenate all values with commas for imagecharts
+          NEXT_STORY=$NEXT_STORY$(echo $(_jq '.[1]')),
+          NEXT_BUG=$NEXT_BUG$(echo $(_jq '.[2]')),
+          NEXT_TASK=$NEXT_TASK$(echo $(_jq '.[3]')),
+          NEXT_SUBTASK=$NEXT_SUBTASK$(echo $(_jq '.[4]')),
+
+          NEXT_SPRINT_NAME=$NEXT_SPRINT_NAME$(echo $(_jq '.[0]')),
+          # Sprint names for labels need | instead of , 
+          # Remove the trailing comma and replace it with |
+          NEXT_SPRINT_NAME="${NEXT_SPRINT_NAME%,}|"
+          # Replace spaces with %20
+          NEXT_SPRINT_NAME=$(echo "$NEXT_SPRINT_NAME" | sed 's/ /%20/g')
+        done <tmp.txt
+        # Remove the trailing comma
+        NEXT_SPRINT_NAME=$(echo ${NEXT_SPRINT_NAME%?})
+        NEXT_STORY=$(echo ${NEXT_STORY%?})
+        NEXT_BUG=$(echo ${NEXT_BUG%?})
+        NEXT_TASK=$(echo ${NEXT_TASK%?})
+        NEXT_SUBTASK=$(echo ${NEXT_SUBTASK%?})
+        
+        COUNTS="$NEXT_STORY|$NEXT_BUG|$NEXT_TASK|$NEXT_SUBTASK"
+        echo ::set-output name=URL::'https://image-charts.com/chart?chbh=20&chxs=0,min40&chxl=0:|'$NEXT_SPRINT_NAME'&chd=t:'$COUNTS'&chdl=Story|Bug|Task|Subtask&chma=0,0,10,10&chs=700x300&cht=bvs&chtt=Sprint%20Tickets%20Completed&chxt=x,y&chco=63BA3C,E5493A,4499FF,A1CCFF'
+    - 
+      name: Output graph to slack thread
+      uses: archive/github-actions-slack@master
+      with:
+        slack-function: send-message
+        slack-bot-user-oauth-access-token: ${{ secrets.SLACK_BOT_USER_OAUTH_ACCESS_TOKEN }}
+        slack-channel: ${{ fromJson(steps.send-message.outputs.slack-result).response.channel }}
+        slack-text:  ${{ steps.sheets.outputs.URL }}
+        slack-optional-thread_ts: ${{ fromJson(steps.send-message.outputs.slack-result).response.message.ts }}
+        slack-optional-parse: full
+      
