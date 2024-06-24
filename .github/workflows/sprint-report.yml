@@ -56,10 +56,10 @@ jobs:
         EOF123
 
         # 2. Flatten json format into a simple structure
-        all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
+        all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, parent: .fields.parent.key, status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
 
-        # 3. Group issues by type
-        grouped2=$(echo $all | jq 'group_by (.issuetype)[]')
+        # 3. Group issues by Epic and then by Issue Type
+        grouped2=$(echo $all | jq 'group_by(.epic) | map({epic: .[0].epic, issues: group_by(.issuetype)})')
 
         # 4. Count issues of each type
         NUM_STORY=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Story"))) | length')
@@ -72,40 +72,47 @@ jobs:
         echo "--------"
         
         # 5. Build up OUTPUT variable for long slack thread response. Using base64 otherwise special character break processing.
-        for row in $(echo "${grouped2}" | jq -r '.[] | @base64'); do
-
+        for epic_row in $(echo "${grouped2}" | jq -r '.[] | @base64'); do
+        
             # Helper function to decode base64 and run jq queries
             _jq() {
-             echo ${row} | base64 --decode | jq -r ${1}
+             echo ${epic_row} | base64 --decode | jq -r ${1}
             }
-            
-          # if new issue type print header
-          if [ "$issuetype" != "$(_jq '.issuetype')" ]; then
-            issuetype=$(_jq '.issuetype')
-            echo $issuetype
-            
-            if [ "$issuetype" == "Story" ]; then
-              NEXT_SUMMARY=":large_green_square: *Story:$NUM_STORY*"
-            elif [ "$issuetype" == "Task" ]; then
-              NEXT_SUMMARY=":large_blue_square: *Task:$NUM_TASK*"
-            elif [ "$issuetype" == "Sub-task" ]; then
-              NEXT_SUMMARY=":subtask-jira: *Sub-task:$NUM_SUBTASK*"
-            elif [ "$issuetype" == "Bug" ]; then
-              NEXT_SUMMARY=":large_red_square: *Bug:$NUM_BUG*"
-            else
-              NEXT_SUMMARY=":point_right: *$issuetype*"
-            fi
-            # check if OUTPUT is null
-            if [ -z "$OUTPUT" ]; then
-              OUTPUT="$NEXT_SUMMARY"
-            else
-              OUTPUT="$OUTPUT\n\n$NEXT_SUMMARY"
-            fi
-            
+        
+          epic=$(_jq '.epic')
+          echo $epic
+          
+          # Format the Epic header
+          NEXT_SUMMARY=":large_blue_circle: *Epic: $epic*"
+          if [ -z "$OUTPUT" ]; then
+            OUTPUT="$NEXT_SUMMARY"
+          else
+            OUTPUT="$OUTPUT\n\n$NEXT_SUMMARY"
           fi
-          NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq '.key')"|"$(_jq '.key') $(_jq '.summary')">" "~" $(_jq '.assignee'))
-          echo "$NEXT"
-          OUTPUT="$OUTPUT\n$NEXT"
+        
+          # Loop through issue types within the epic
+          for issuetype_row in $(echo $(_jq '.issues') | jq -r '.[] | @base64'); do
+            _jq_issuetype() {
+             echo ${issuetype_row} | base64 --decode | jq -r ${1}
+            }
+        
+            issuetype=$(_jq_issuetype '.[0].issuetype')
+            echo $issuetype
+        
+            # Format the Issue Type header within the Epic
+            NEXT_SUMMARY=":point_right: *$issuetype*"
+            OUTPUT="$OUTPUT\n\n$NEXT_SUMMARY"
+        
+            # Loop through issues within the issue type
+            for issue in $(echo $(_jq_issuetype '.') | jq -r '.[] | @base64'); do
+              _jq_issue() {
+               echo ${issue} | base64 --decode | jq -r ${1}
+              }
+              NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq_issue '.key')"|"$(_jq_issue '.key') $(_jq_issue '.summary')">" "~" $(_jq_issue '.assignee') "("$(_jq_issue '.status')")")
+              echo "$NEXT"
+              OUTPUT="$OUTPUT\n$NEXT"
+            done
+          done
         done
         echo "----------"
         echo $OUTPUT
