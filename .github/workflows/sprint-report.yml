@@ -59,7 +59,7 @@ jobs:
         all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, parent: .fields.parent.key, status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
 
         # 3. Group issues by Epic and then by Issue Type
-        grouped2=$(echo $all | jq 'group_by(.epic) | map({epic: .[0].epic, issues: group_by(.issuetype)})')
+        grouped2=$(echo $all | jq 'group_by(.parent) | map({parent: .[0].parent, issues: group_by(.issuetype)})')
 
         # 4. Count issues of each type
         NUM_STORY=$(cat /tmp/jql.json | jq '.issues | map(select(.fields.issuetype.name | contains("Story"))) | length')
@@ -79,11 +79,11 @@ jobs:
              echo ${epic_row} | base64 --decode | jq -r ${1}
             }
         
-          epic=$(_jq '.epic')
-          echo $epic
+          parent=$(_jq '.parent')
+          echo $parent
           
           # Format the Epic header
-          NEXT_SUMMARY=":large_blue_circle: *Epic: $epic*"
+          NEXT_SUMMARY=":large_blue_circle: *Epic: $parent*"
           if [ -z "$OUTPUT" ]; then
             OUTPUT="$NEXT_SUMMARY"
           else
