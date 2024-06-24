@@ -56,7 +56,7 @@ jobs:
         EOF123
 
         # 2. Flatten json format into a simple structure
-        all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, parent: .fields.parent.summary, parentkey: .fields.parent.key, status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
+        all=$(cat /tmp/jql.json | jq '.issues | .[] | {key: .key, issuetype: .fields.issuetype.name, parent: (.fields.parent.key // "No Parent"), parent_summary: (.fields.parent.fields.summary // "No epic"), status: .fields.status.name, summary: .fields.summary, assignee: .fields.assignee.displayName}' | jq -s '.')
 
         # 3. Group issues by Epic and then by Issue Type
         grouped2=$(echo $all | jq 'group_by(.parent) | map({parent: .[0].parent, issues: group_by(.issuetype)})')
@@ -79,7 +79,7 @@ jobs:
              echo ${epic_row} | base64 --decode | jq -r ${1}
             }
         
-          parent=$(_jq '.parent')
+          parent=$(_jq '.parent_summary')
           echo $parent
           
           # Format the Epic header
