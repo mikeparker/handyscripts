@@ -83,7 +83,7 @@ jobs:
           echo $parent
           
           # Format the Epic header
-          NEXT_SUMMARY=":large_blue_circle: *Epic: $parent*"
+          NEXT_SUMMARY=":large_purple_square: *Epic: $parent*"
           if [ -z "$OUTPUT" ]; then
             OUTPUT="$NEXT_SUMMARY"
           else
@@ -98,17 +98,25 @@ jobs:
         
             issuetype=$(_jq_issuetype '.[0].issuetype')
             echo $issuetype
-        
-            # Format the Issue Type header within the Epic
-            NEXT_SUMMARY=":point_right: *$issuetype*"
-            OUTPUT="$OUTPUT\n\n$NEXT_SUMMARY"
+
+            if [ "$issuetype" == "Story" ]; then
+              EMOJI=":large_green_circle:"
+            elif [ "$issuetype" == "Task" ]; then
+              EMOJI=":large_blue_circle:"
+            elif [ "$issuetype" == "Sub-task" ]; then
+              EMOJI=":subtask-jira:"
+            elif [ "$issuetype" == "Bug" ]; then
+              EMOJI=":large_red_circle:"
+            else
+              EMOJI=":point_right: *$issuetype*"
+            fi
         
             # Loop through issues within the issue type
             for issue in $(echo $(_jq_issuetype '.') | jq -r '.[] | @base64'); do
               _jq_issue() {
                echo ${issue} | base64 --decode | jq -r ${1}
               }
-              NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq_issue '.key')"|"$(_jq_issue '.key') $(_jq_issue '.summary')">" "~" $(_jq_issue '.assignee') "("$(_jq_issue '.status')")")
+              NEXT=$(echo "• $EMOJI <https://docker.atlassian.net/browse/"$(_jq_issue '.key')"|"$(_jq_issue '.key') $(_jq_issue '.summary')">" "~" $(_jq_issue '.assignee') "("$(_jq_issue '.status')")")
               echo "$NEXT"
               OUTPUT="$OUTPUT\n$NEXT"
             done
