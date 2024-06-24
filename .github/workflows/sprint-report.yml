@@ -103,7 +103,7 @@ jobs:
             fi
             
           fi
-          NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq '.key')"|"$(_jq '.key') $(_jq '.summary')">" "~" $(_jq '.assignee') "("$(_jq '.status')")")
+          NEXT=$(echo "• <https://docker.atlassian.net/browse/"$(_jq '.key')"|"$(_jq '.key') $(_jq '.summary')">" "~" $(_jq '.assignee'))
           echo "$NEXT"
           OUTPUT="$OUTPUT\n$NEXT"
         done
