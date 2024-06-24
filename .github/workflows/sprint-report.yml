@@ -106,7 +106,7 @@ jobs:
             elif [ "$issuetype" == "Sub-task" ]; then
               EMOJI=":subtask-jira:"
             elif [ "$issuetype" == "Bug" ]; then
-              EMOJI=":large_red_circle:"
+              EMOJI=":red_circle:"
             else
               EMOJI=":point_right: *$issuetype*"
             fi
@@ -116,7 +116,7 @@ jobs:
               _jq_issue() {
                echo ${issue} | base64 --decode | jq -r ${1}
               }
-              NEXT=$(echo "• $EMOJI <https://docker.atlassian.net/browse/"$(_jq_issue '.key')"|"$(_jq_issue '.key') $(_jq_issue '.summary')">" "~" $(_jq_issue '.assignee') "("$(_jq_issue '.status')")")
+              NEXT=$(echo "• $EMOJI <https://docker.atlassian.net/browse/"$(_jq_issue '.key')"|"$(_jq_issue '.key') $(_jq_issue '.summary')">" "~" $(_jq_issue '.assignee'))
               echo "$NEXT"
               OUTPUT="$OUTPUT\n$NEXT"
             done
